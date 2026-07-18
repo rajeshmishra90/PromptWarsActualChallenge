@@ -37,7 +37,7 @@ async def test_gemini(payload: TestRequest):
     
     # Simple generation to verify integration
     response = client.models.generate_content(
-        model='gemini-2.5-flash',
+        model='gemini-3.5-flash',
         contents=f"Respond with a short greeting and say: 'Gemini Integration is Working! Received: {payload.prompt}'"
     )
     
