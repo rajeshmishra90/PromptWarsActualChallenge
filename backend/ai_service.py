@@ -9,9 +9,8 @@ if not api_key:
     raise ValueError("GEMINI_API_KEY is not set in the environment.")
 genai.configure(api_key=api_key)
 
-# We use Gemini 3.5 Flash for speed, but the environment may be overriden by standard genai config
-# It's fine to just use gemini-1.5-flash as the standard fallback for this hackathon
-model = genai.GenerativeModel('gemini-1.5-flash', generation_config={"response_mime_type": "application/json"})
+# We use Gemini 3.5 Flash for speed
+model = genai.GenerativeModel('gemini-3.5-flash', generation_config={"response_mime_type": "application/json"})
 
 def generate_onboard_profile(target_habit: str, habit_triggers: str, underlying_emotion: str, future_motivation: str):
     prompt = f"""
