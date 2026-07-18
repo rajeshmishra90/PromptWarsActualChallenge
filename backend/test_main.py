@@ -4,7 +4,7 @@ Run with: pytest test_main.py -v
 """
 import json
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -103,15 +103,13 @@ class TestOnboarding:
         response = client.post("/api/auth", json={"phone": "1111111111", "password": "pass"})
         return response.json()["user_id"]
 
-    @patch("ai_service.model")
-    def test_onboard_success(self, mock_model, client):
+    @patch("ai_service._call_model")
+    def test_onboard_success(self, mock_call, client):
         """Onboarding with valid AI response persists profile and awards coins."""
-        mock_response = MagicMock()
-        mock_response.text = json.dumps({
+        mock_call.return_value = json.dumps({
             "assigned_persona": "Strict Desi Aunty",
             "interventions": ["Do 10 pushups", "Drink water", "Call a friend"]
         })
-        mock_model.generate_content.return_value = mock_response
 
         user_id = self._create_user(client)
         response = client.post("/api/onboard", json={
@@ -149,13 +147,11 @@ class TestOnboarding:
 # ─────────────────────────────────────────────
 
 class TestIntervention:
-    def _setup_user(self, client, mock_model):
-        mock_response = MagicMock()
-        mock_response.text = json.dumps({
+    def _setup_user(self, client, mock_call):
+        mock_call.return_value = json.dumps({
             "assigned_persona": "Disappointed IIT Professor",
             "interventions": ["Read a book", "Meditate", "Go for a walk"]
         })
-        mock_model.generate_content.return_value = mock_response
 
         reg = client.post("/api/auth", json={"phone": "2222222222", "password": "pass"})
         user_id = reg.json()["user_id"]
@@ -168,26 +164,22 @@ class TestIntervention:
         })
         return user_id
 
-    @patch("ai_service.model")
-    def test_intervene_success(self, mock_model, client):
+    @patch("ai_service._call_model")
+    def test_intervene_success(self, mock_call, client):
         """Intervention returns brain_dialogue and cbt_challenge, awards 10 coins."""
-        mock_onboard = MagicMock()
-        mock_onboard.text = json.dumps({
+        onboard_payload = json.dumps({
             "assigned_persona": "Disappointed IIT Professor",
             "interventions": ["Read a book", "Meditate", "Go for a walk"]
         })
-        mock_intervene = MagicMock()
-        mock_intervene.text = json.dumps({
+        intervene_payload = json.dumps({
             "brain_dialogue": "Arey, again you are stressed?",
             "cbt_challenge": "Do 5 deep breaths right now.",
-            "wallet_balance": 0,
-            "vault_unlocked": False
         })
-        mock_model.generate_content.side_effect = [mock_onboard, mock_intervene]
+        mock_call.side_effect = [onboard_payload, intervene_payload]
 
-        user_id = self._setup_user(client, mock_model)
-        # Reset side_effect for intervene call
-        mock_model.generate_content.side_effect = [mock_intervene]
+        user_id = self._setup_user(client, mock_call)
+        # Reset side_effect for the intervene call only
+        mock_call.side_effect = [intervene_payload]
 
         response = client.post("/api/intervene", json={
             "user_id": user_id,
@@ -217,15 +209,13 @@ class TestIntervention:
 # ─────────────────────────────────────────────
 
 class TestVault:
-    @patch("ai_service.model")
-    def test_unlock_vault_insufficient_coins(self, mock_model, client):
+    @patch("ai_service._call_model")
+    def test_unlock_vault_insufficient_coins(self, mock_call, client):
         """Cannot unlock vault without 50 coins."""
-        mock_response = MagicMock()
-        mock_response.text = json.dumps({
+        mock_call.return_value = json.dumps({
             "assigned_persona": "Strict Desi Aunty",
             "interventions": ["a", "b", "c"]
         })
-        mock_model.generate_content.return_value = mock_response
 
         reg = client.post("/api/auth", json={"phone": "3333333333", "password": "pass"})
         user_id = reg.json()["user_id"]
@@ -260,3 +250,100 @@ class TestSchemas:
             interventions=["a", "b", "c"]
         )
         assert len(bp.interventions) == 3
+
+
+# ─────────────────────────────────────────────
+# HEALTH CHECK TESTS
+# ─────────────────────────────────────────────
+
+class TestHealth:
+    def test_health_check(self, client):
+        """Health endpoint returns ok status."""
+        response = client.get("/api/health")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        assert data["service"] == "needy-brain-api"
+
+
+# ─────────────────────────────────────────────
+# VAULT UNLOCK SUCCESS PATH
+# ─────────────────────────────────────────────
+
+class TestVaultSuccess:
+    @patch("ai_service._call_model")
+    def test_unlock_vault_success_after_earning_coins(self, mock_call, client):
+        """User with 50+ coins can unlock vault successfully."""
+        mock_call.return_value = json.dumps({
+            "assigned_persona": "Strict Desi Aunty",
+            "interventions": ["a", "b", "c"]
+        })
+
+        # Register and onboard (awards 50 coins)
+        reg = client.post("/api/auth", json={"phone": "4444444444", "password": "pass"})
+        user_id = reg.json()["user_id"]
+        client.post("/api/onboard", json={
+            "user_id": user_id,
+            "target_habit": "Smoking",
+            "habit_triggers": "Stress",
+            "underlying_emotion": "Anxiety",
+            "future_motivation": "Better health for my family"
+        })
+
+        # Should now have 50 coins — unlock should succeed
+        response = client.post("/api/unlock-vault", json={"user_id": user_id})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["vault_unlocked"] is True
+        assert data["wallet_balance"] == 0  # 50 awarded, 50 spent
+
+    @patch("ai_service._call_model")
+    def test_unlock_vault_idempotent(self, mock_call, client):
+        """Unlocking an already-unlocked vault returns success=False with a message."""
+        mock_call.return_value = json.dumps({
+            "assigned_persona": "Strict Desi Aunty",
+            "interventions": ["a", "b", "c"]
+        })
+
+        reg = client.post("/api/auth", json={"phone": "5555555555", "password": "pass"})
+        user_id = reg.json()["user_id"]
+        client.post("/api/onboard", json={
+            "user_id": user_id,
+            "target_habit": "Smoking",
+            "habit_triggers": "Stress",
+            "underlying_emotion": "Anxiety",
+            "future_motivation": "Better health for my family"
+        })
+        # First unlock
+        client.post("/api/unlock-vault", json={"user_id": user_id})
+        # Second unlock should fail gracefully
+        response = client.post("/api/unlock-vault", json={"user_id": user_id})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is False
+        assert data["vault_unlocked"] is True
+
+
+# ─────────────────────────────────────────────
+# AI SERVICE UNIT TESTS
+# ─────────────────────────────────────────────
+
+class TestAIService:
+    def test_safe_parse_raises_on_invalid_json(self):
+        """_safe_parse raises ValueError on non-JSON input."""
+        from ai_service import _safe_parse
+        with pytest.raises(ValueError, match="invalid response format"):
+            _safe_parse("not json", ["key"])
+
+    def test_safe_parse_raises_on_missing_keys(self):
+        """_safe_parse raises ValueError when required keys are absent."""
+        from ai_service import _safe_parse
+        with pytest.raises(ValueError, match="missing required keys"):
+            _safe_parse('{"other": "value"}', ["assigned_persona"])
+
+    def test_safe_parse_success(self):
+        """_safe_parse returns dict when all required keys present."""
+        from ai_service import _safe_parse
+        result = _safe_parse('{"a": 1, "b": 2}', ["a", "b"])
+        assert result == {"a": 1, "b": 2}

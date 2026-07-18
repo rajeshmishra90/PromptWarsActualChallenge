@@ -10,7 +10,8 @@ if os.path.exists(".env"):
                 key, val = line.strip().split("=", 1)
                 os.environ[key.strip()] = val.strip()
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -26,8 +27,17 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI(
     title="Needy Brain API",
     description="AI-powered CBT habit-breaking companion",
-    version="1.0.0"
+    version="1.0.0",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json",
 )
+
+
+@app.exception_handler(ValueError)
+async def value_error_handler(request: Request, exc: ValueError):
+    """Return 422 for value errors (e.g. AI parse failures)."""
+    return JSONResponse(status_code=422, content={"detail": str(exc)})
 
 # Security: read allowed origins from environment variable
 # Falls back to wildcard when FRONTEND_URL is not configured (e.g. Render free tier cold start)
@@ -111,11 +121,11 @@ async def onboard_user(payload: schemas.OnboardRequest, db: Session = Depends(ge
         raise HTTPException(status_code=404, detail="User not found")
         
     try:
-        blueprint = ai_service.generate_onboard_profile(
+        blueprint = await ai_service.generate_onboard_profile(
             target_habit=payload.target_habit,
             habit_triggers=payload.habit_triggers,
             underlying_emotion=payload.underlying_emotion,
-            future_motivation=payload.future_motivation
+            future_motivation=payload.future_motivation,
         )
         
         db_user.target_habit = payload.target_habit
@@ -136,9 +146,12 @@ async def onboard_user(payload: schemas.OnboardRequest, db: Session = Depends(ge
             wallet_balance=db_user.wallet_balance,
             vault_unlocked=bool(db_user.vault_unlocked)
         )
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/api/intervene", response_model=schemas.InterveneResponse)
@@ -148,11 +161,11 @@ async def intervene(payload: schemas.InterveneRequest, db: Session = Depends(get
         raise HTTPException(status_code=404, detail="User not found")
         
     try:
-        response = ai_service.generate_intervention(
+        response = await ai_service.generate_intervention(
             persona=db_user.assigned_persona,
             target_habit=db_user.target_habit,
             interventions=db_user.interventions,
-            current_feeling=payload.current_feeling
+            current_feeling=payload.current_feeling,
         )
         
         # Reward user with 10 coins for using the intervention system
@@ -165,9 +178,12 @@ async def intervene(payload: schemas.InterveneRequest, db: Session = Depends(get
             wallet_balance=db_user.wallet_balance,
             vault_unlocked=bool(db_user.vault_unlocked)
         )
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.post("/api/unlock-vault", response_model=schemas.UnlockVaultResponse)
 async def unlock_vault(payload: schemas.UnlockVaultRequest, db: Session = Depends(get_db)):

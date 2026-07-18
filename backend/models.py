@@ -6,7 +6,10 @@ from database import Base
 
 # Fallback for SQLite to simulate JSONB
 class JSONEncodedDict(TypeDecorator):
+    """Stores a Python list/dict as JSON text, compatible with SQLite and PostgreSQL."""
+
     impl = TEXT
+    cache_ok = True  # Required by SQLAlchemy 1.4+ for caching safety
 
     def process_bind_param(self, value, dialect):
         if value is not None:
@@ -23,7 +26,7 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     phone = Column(String, unique=True, index=True, nullable=False)
-    password = Column(String, nullable=False) # Plaintext for hackathon simplicity
+    password = Column(String, nullable=False)  # Stored as HMAC-SHA256 hash
     
     # CBT Fields (nullable=True because they are filled during onboarding, after auth)
     target_habit = Column(String, nullable=True)
@@ -38,4 +41,7 @@ class User(Base):
     # Wallet & Rewards
     wallet_balance = Column(Integer, default=0, nullable=False)
     vault_unlocked = Column(Integer, default=0, nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<User id={self.id} phone={self.phone!r} balance={self.wallet_balance}>"
 

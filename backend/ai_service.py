@@ -1,20 +1,74 @@
 import os
-import google.generativeai as genai
 import json
+import asyncio
+import logging
+from dataclasses import dataclass
+from typing import List
+
+import google.generativeai as genai
 from schemas import OnboardBlueprint, InterveneResponse
 
-# Initialize Gemini
+logger = logging.getLogger(__name__)
+
+# Initialize Gemini client once at startup
 api_key = os.getenv("GEMINI_API_KEY")
 if not api_key:
     raise ValueError("GEMINI_API_KEY is not set in the environment.")
 genai.configure(api_key=api_key)
 
-# We use Gemini 3.5 Flash for speed
-model = genai.GenerativeModel('gemini-3.5-flash', generation_config={"response_mime_type": "application/json"})
+# Gemini Flash for low-latency responses
+_model = genai.GenerativeModel(
+    "gemini-2.0-flash",
+    generation_config={"response_mime_type": "application/json"},
+)
 
-def generate_onboard_profile(target_habit: str, habit_triggers: str, underlying_emotion: str, future_motivation: str):
+# ---------------------------------------------------------------------------
+# Internal data classes (avoid raw dicts propagating through the call stack)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _InterveneResult:
+    brain_dialogue: str
+    cbt_challenge: str
+
+
+# ---------------------------------------------------------------------------
+# Private helpers
+# ---------------------------------------------------------------------------
+
+def _safe_parse(text: str, required_keys: List[str]) -> dict:
+    """Parse JSON from model response with validation."""
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        logger.error("Gemini returned non-JSON response: %s", text[:200])
+        raise ValueError(f"AI returned an invalid response format: {exc}") from exc
+
+    missing = [k for k in required_keys if k not in data]
+    if missing:
+        raise ValueError(f"AI response missing required keys: {missing}")
+    return data
+
+
+def _call_model(prompt: str) -> str:
+    """Synchronous wrapper around the Gemini SDK call."""
+    response = _model.generate_content(prompt)
+    return response.text
+
+
+# ---------------------------------------------------------------------------
+# Public API — async so FastAPI can await without blocking the event loop
+# ---------------------------------------------------------------------------
+
+async def generate_onboard_profile(
+    target_habit: str,
+    habit_triggers: str,
+    underlying_emotion: str,
+    future_motivation: str,
+) -> OnboardBlueprint:
+    """Generate a personalised CBT onboarding blueprint via Gemini."""
     prompt = f"""
-You are a brilliant, slightly sarcastic, but deeply caring AI therapist designed for an Indian audience. 
+You are a brilliant, slightly sarcastic, but deeply caring AI therapist designed for an Indian audience.
 A user wants to break a habit using Cognitive Behavioral Therapy (CBT).
 Here is their profile:
 - Target Habit: {target_habit}
@@ -32,37 +86,40 @@ Output JSON exactly matching this schema:
   "interventions": ["string", "string", "string"]
 }}
 """
-    response = model.generate_content(prompt)
-    data = json.loads(response.text)
+    loop = asyncio.get_event_loop()
+    text = await loop.run_in_executor(None, _call_model, prompt)
+    data = _safe_parse(text, ["assigned_persona", "interventions"])
     return OnboardBlueprint(**data)
 
-def generate_intervention(persona: str, target_habit: str, interventions: list, current_feeling: str):
+
+async def generate_intervention(
+    persona: str,
+    target_habit: str,
+    interventions: list,
+    current_feeling: str,
+) -> _InterveneResult:
+    """Generate a real-time CBT intervention response via Gemini."""
     prompt = f"""
-You are "{persona}", a witty and sarcastic AI with an Indian (Desi) sense of humor. 
+You are "{persona}", a witty and sarcastic AI with an Indian (Desi) sense of humor.
 Your user is struggling right now.
 - Their habit to break: {target_habit}
 - Their long-term interventions: {interventions}
 - What they are feeling RIGHT NOW (SOS): {current_feeling}
 
-Provide a humorous, culturally relatable (Indian context), but CBT-grounded response to stop them from doing the habit. 
+Provide a humorous, culturally relatable (Indian context), but CBT-grounded response to stop them from doing the habit.
 It should not be mean, but playfully sarcastic (like a caring but dramatic Indian relative or friend).
 Then, provide a quick 'cbt_challenge' (a 1-minute action they can do immediately instead of the habit).
 
 Output JSON exactly matching this schema:
 {{
   "brain_dialogue": "string",
-  "cbt_challenge": "string",
-  "wallet_balance": 0,
-  "vault_unlocked": false
+  "cbt_challenge": "string"
 }}
 """
-    response = model.generate_content(prompt)
-    data = json.loads(response.text)
-    
-    # We ignore the dummy wallet fields from AI and just return the strings, the main app handles DB wallet logic
-    class DummyInterveneRes:
-        pass
-    res = DummyInterveneRes()
-    res.brain_dialogue = data["brain_dialogue"]
-    res.cbt_challenge = data["cbt_challenge"]
-    return res
+    loop = asyncio.get_event_loop()
+    text = await loop.run_in_executor(None, _call_model, prompt)
+    data = _safe_parse(text, ["brain_dialogue", "cbt_challenge"])
+    return _InterveneResult(
+        brain_dialogue=data["brain_dialogue"],
+        cbt_challenge=data["cbt_challenge"],
+    )
