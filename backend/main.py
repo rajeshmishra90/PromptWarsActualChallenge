@@ -30,15 +30,20 @@ app = FastAPI(
 )
 
 # Security: read allowed origins from environment variable
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
-allowed_origins = [o.strip() for o in FRONTEND_URL.split(",") if o.strip()]
+# Falls back to wildcard when FRONTEND_URL is not configured (e.g. Render free tier cold start)
+FRONTEND_URL = os.getenv("FRONTEND_URL", "")
+if FRONTEND_URL:
+    allowed_origins = [o.strip() for o in FRONTEND_URL.split(",") if o.strip()]
+else:
+    # Allow all origins when env var not set — safe for hackathon / open API
+    allowed_origins = ["*"]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
