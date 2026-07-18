@@ -131,10 +131,10 @@ class TestOnboarding:
         """Onboarding non-existent user returns 404."""
         response = client.post("/api/onboard", json={
             "user_id": 9999,
-            "target_habit": "test",
-            "habit_triggers": "test",
-            "underlying_emotion": "test",
-            "future_motivation": "test"
+            "target_habit": "Doomscrolling at night",
+            "habit_triggers": "Lying in bed, boredom",
+            "underlying_emotion": "Anxiety and loneliness",
+            "future_motivation": "I want to sleep better and be more productive at work"
         })
         assert response.status_code == 404
 
