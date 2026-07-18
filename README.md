@@ -5,7 +5,7 @@
 
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/React-19-blue)](https://react.dev/)
-[![Gemini](https://img.shields.io/badge/AI-Gemini_2.0_Flash-orange)](https://ai.google.dev/)
+[![Gemini](https://img.shields.io/badge/AI-Gemini_3.5_Flash-orange)](https://ai.google.dev/)
 [![Deploy on Render](https://img.shields.io/badge/Deploy-Render-purple)](https://render.com/)
 
 ---
