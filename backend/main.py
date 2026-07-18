@@ -1,4 +1,6 @@
 import os
+import hashlib
+import hmac
 
 # Load .env file variables manually if it exists locally before imports
 if os.path.exists(".env"):
@@ -21,28 +23,52 @@ import json
 # Initialize database tables
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI()
+app = FastAPI(
+    title="Needy Brain API",
+    description="AI-powered CBT habit-breaking companion",
+    version="1.0.0"
+)
 
+# Security: read allowed origins from environment variable
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+allowed_origins = [o.strip() for o in FRONTEND_URL.split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
+
+
+def hash_password(password: str) -> str:
+    """Hash password using SHA-256 with a fixed salt (upgrade to bcrypt in production)."""
+    secret = os.getenv("PASSWORD_SALT", "needy-brain-salt-2026")
+    return hmac.new(secret.encode(), password.encode(), hashlib.sha256).hexdigest()
+
+
+def verify_password(plain: str, hashed: str) -> bool:
+    """Constant-time password comparison."""
+    return hmac.compare_digest(hash_password(plain), hashed)
+
+
+@app.get("/api/health")
+async def health_check():
+    """Health check endpoint for deployment monitoring."""
+    return {"status": "ok", "service": "needy-brain-api"}
 
 
 @app.post("/api/auth", response_model=schemas.AuthResponse)
 async def authenticate_user(payload: schemas.AuthRequest, db: Session = Depends(get_db)):
     db_user = db.query(models.User).filter(models.User.phone == payload.phone).first()
-    
+
     is_new = False
     if not db_user:
-        # Register new user
+        # Register new user with hashed password
         db_user = models.User(
             phone=payload.phone,
-            password=payload.password, # Plaintext for hackathon
+            password=hash_password(payload.password),
             wallet_balance=0,
             vault_unlocked=0
         )
@@ -51,13 +77,13 @@ async def authenticate_user(payload: schemas.AuthRequest, db: Session = Depends(
         db.refresh(db_user)
         is_new = True
     else:
-        # Verify password
-        if db_user.password != payload.password:
-            raise HTTPException(status_code=401, detail="Invalid password")
-            
+        # Verify password using constant-time comparison
+        if not verify_password(payload.password, db_user.password):
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+
     # Check if onboarding is complete (they have a target habit)
     onboarding_complete = bool(db_user.target_habit)
-    
+
     return schemas.AuthResponse(
         user_id=db_user.id,
         is_new_user=is_new,
