@@ -1,7 +1,16 @@
+import os
+
+# Load .env file variables manually if it exists locally before imports
+if os.path.exists(".env"):
+    with open(".env") as f:
+        for line in f:
+            if "=" in line and not line.strip().startswith("#"):
+                key, val = line.strip().split("=", 1)
+                os.environ[key.strip()] = val.strip()
+
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-import os
 
 from database import engine, get_db, Base
 import models
@@ -14,6 +23,7 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,14 +31,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Load .env file variables manually if it exists locally
-if os.path.exists(".env"):
-    with open(".env") as f:
-        for line in f:
-            if "=" in line and not line.strip().startswith("#"):
-                key, val = line.strip().split("=", 1)
-                os.environ[key.strip()] = val.strip()
 
 
 @app.post("/api/auth", response_model=schemas.AuthResponse)
