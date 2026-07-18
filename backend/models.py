@@ -22,14 +22,20 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    target_habit = Column(String, nullable=False)
-    danger_zone_time = Column(String, nullable=False)
-    future_motivation = Column(Text, nullable=False)
-    assigned_persona = Column(String, nullable=False)
-    # Use JSONB for Postgres, or fallback to TEXT for SQLite
-    interventions = Column(JSONEncodedDict, nullable=False)
+    phone = Column(String, unique=True, index=True, nullable=False)
+    password = Column(String, nullable=False) # Plaintext for hackathon simplicity
+    
+    # CBT Fields (nullable=True because they are filled during onboarding, after auth)
+    target_habit = Column(String, nullable=True)
+    habit_triggers = Column(String, nullable=True)
+    underlying_emotion = Column(String, nullable=True)
+    future_motivation = Column(Text, nullable=True)
+    
+    # AI Profile
+    assigned_persona = Column(String, nullable=True)
+    interventions = Column(JSONEncodedDict, nullable=True)
     
     # Wallet & Rewards
     wallet_balance = Column(Integer, default=0, nullable=False)
-    vault_unlocked = Column(Integer, default=0, nullable=False) # SQLite doesn't have Boolean by default, using Integer 0/1 or we can use sqlalchemy.Boolean
+    vault_unlocked = Column(Integer, default=0, nullable=False)
 
