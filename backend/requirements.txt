@@ -1,6 +1,6 @@
 fastapi
 uvicorn
-google-genai
+google-generativeai
 pydantic
 sqlalchemy
 psycopg2-binary
